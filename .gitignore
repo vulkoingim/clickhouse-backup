@@ -2,5 +2,5 @@
 *.exe
 debug
 go.sum
-clickhouse-backup
+/clickhouse-backup
 config.yml
