@@ -1,4 +1,4 @@
-package main
+package utils
 
 import (
 	"fmt"
@@ -19,7 +19,7 @@ type Backup struct {
 	Date time.Time
 }
 
-func cleanDir(dir string) error {
+func CleanDir(dir string) error {
 	d, err := os.Open(dir)
 	if err != nil {
 		return err
@@ -38,7 +38,7 @@ func cleanDir(dir string) error {
 	return nil
 }
 
-func isClickhouseShadow(path string) bool {
+func IsClickhouseShadow(path string) bool {
 	d, err := os.Open(path)
 	if err != nil {
 		return false
@@ -59,7 +59,7 @@ func isClickhouseShadow(path string) bool {
 	return true
 }
 
-func moveShadow(shadowPath, backupPath string) error {
+func MoveShadow(shadowPath, backupPath string) error {
 	if err := filepath.Walk(shadowPath, func(filePath string, info os.FileInfo, err error) error {
 		relativePath := strings.Trim(strings.TrimPrefix(filePath, shadowPath), "/")
 		pathParts := strings.SplitN(relativePath, "/", 3)
@@ -78,10 +78,10 @@ func moveShadow(shadowPath, backupPath string) error {
 	}); err != nil {
 		return err
 	}
-	return cleanDir(shadowPath)
+	return CleanDir(shadowPath)
 }
 
-func copyPath(src, dst string, dryRun bool) error {
+func CopyPath(src, dst string, dryRun bool) error {
 	if _, err := os.Stat(src); err != nil {
 		return err
 	}
@@ -108,11 +108,11 @@ func copyPath(src, dst string, dryRun bool) error {
 			log.Printf("'%s' is not a regular file, skipping", filePath)
 			return nil
 		}
-		return copyFile(filePath, dstFilePath)
+		return CopyFile(filePath, dstFilePath)
 	})
 }
 
-func copyFile(srcFile string, dstFile string) error {
+func CopyFile(srcFile string, dstFile string) error {
 	src, err := os.Open(srcFile)
 	if err != nil {
 		return err
@@ -137,7 +137,7 @@ func GetBackupsToDelete(backups []Backup, keep int) []Backup {
 	return []Backup{}
 }
 
-func getArchiveWriter(format string, level int) (archiver.Writer, error) {
+func GetArchiveWriter(format string, level int) (archiver.Writer, error) {
 	switch format {
 	case "tar":
 		return &archiver.Tar{}, nil
@@ -155,7 +155,7 @@ func getArchiveWriter(format string, level int) (archiver.Writer, error) {
 	return nil, fmt.Errorf("wrong compression_format, supported: 'lz4', 'bzip2', 'gzip', 'sz', 'xz'")
 }
 
-func getExtension(format string) string {
+func GetExtension(format string) string {
 	switch format {
 	case "tar":
 		return "tar"
@@ -173,7 +173,7 @@ func getExtension(format string) string {
 	return ""
 }
 
-func getArchiveReader(format string) (archiver.Reader, error) {
+func GetArchiveReader(format string) (archiver.Reader, error) {
 	switch format {
 	case "tar":
 		return archiver.NewTar(), nil

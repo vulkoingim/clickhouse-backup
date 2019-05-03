@@ -1,4 +1,4 @@
-package main
+package s3
 
 import (
 	"archive/tar"
@@ -17,6 +17,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/AlexAkulov/clickhouse-backup/backend/config"
+	"github.com/AlexAkulov/clickhouse-backup/backend/utils"
 	"github.com/AlexAkulov/s3gof3r"
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/credentials"
@@ -33,7 +35,7 @@ const MetaFileName = "meta.json"
 type S3 struct {
 	session        *session.Session
 	s3Stream       *s3gof3r.Bucket
-	Config         *S3Config
+	Config         *config.S3Config
 	DryRun         bool
 	s3StreamConfig *s3gof3r.Config
 }
@@ -83,13 +85,13 @@ func (s *S3) CompressedStreamDownload(s3Path, localPath string) error {
 	if err := os.Mkdir(localPath, os.ModePerm); err != nil {
 		return err
 	}
-	archiveName := path.Join(s.Config.Path, fmt.Sprintf("%s.%s", s3Path, getExtension(s.Config.CompressionFormat)))
+	archiveName := path.Join(s.Config.Path, fmt.Sprintf("%s.%s", s3Path, utils.GetExtension(s.Config.CompressionFormat)))
 	r, _, err := s.s3Stream.GetReader(archiveName, s.s3StreamConfig)
 	if err != nil {
 		return err
 	}
 	defer r.Close()
-	z, _ := getArchiveReader(s.Config.CompressionFormat)
+	z, _ := utils.GetArchiveReader(s.Config.CompressionFormat)
 
 	if err := z.Open(r, 0); err != nil {
 		return err
@@ -180,18 +182,18 @@ func (s *S3) CompressedStreamUpload(localPath, s3Path, diffFromPath string) erro
 		if !fi.IsDir() {
 			return fmt.Errorf("'%s' is not a directory", diffFromPath)
 		}
-		if isClickhouseShadow(filepath.Join(diffFromPath, "shadow")) {
+		if utils.IsClickhouseShadow(filepath.Join(diffFromPath, "shadow")) {
 			return fmt.Errorf("'%s' is old format backup and doesn't supports diff", filepath.Base(diffFromPath))
 		}
 	}
 	hardlinks := []string{}
-	archiveName := path.Join(s.Config.Path, fmt.Sprintf("%s.%s", s3Path, getExtension(s.Config.CompressionFormat)))
+	archiveName := path.Join(s.Config.Path, fmt.Sprintf("%s.%s", s3Path, utils.GetExtension(s.Config.CompressionFormat)))
 	w, err := s.s3Stream.PutWriter(archiveName, http.Header{"X-Amz-Acl": []string{s.Config.ACL}}, s.s3StreamConfig)
 	if err != nil {
 		return err
 	}
 	defer w.Close()
-	z, _ := getArchiveWriter(s.Config.CompressionFormat, s.Config.CompressionLevel)
+	z, _ := utils.GetArchiveWriter(s.Config.CompressionFormat, s.Config.CompressionLevel)
 	if err := z.Create(w); err != nil {
 		return err
 	}
@@ -512,7 +514,7 @@ func (s *S3) getS3Files(localPath, s3Path string) (s3Files map[string]fileInfo, 
 	return
 }
 
-func (s *S3) BackupList() ([]Backup, error) {
+func (s *S3) BackupList() ([]utils.Backup, error) {
 	type s3Backup struct {
 		Metadata bool
 		Shadow   bool
@@ -548,10 +550,10 @@ func (s *S3) BackupList() ([]Backup, error) {
 			}
 		}
 	})
-	result := []Backup{}
+	result := []utils.Backup{}
 	for name, e := range s3Files {
 		if e.Metadata && e.Shadow || e.Tar {
-			result = append(result, Backup{
+			result = append(result, utils.Backup{
 				Name: name,
 				Date: e.Date,
 			})
@@ -571,7 +573,7 @@ func (s *S3) RemoveOldBackups(keep int) error {
 	if err != nil {
 		return err
 	}
-	backupsToDelete := GetBackupsToDelete(backupList, keep)
+	backupsToDelete := utils.GetBackupsToDelete(backupList, keep)
 	objects := []s3manager.BatchDeleteObject{}
 	s.remotePager(s.Config.Path, false, func(page *s3.ListObjectsV2Output) {
 		for _, c := range page.Contents {

@@ -9,6 +9,8 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/AlexAkulov/clickhouse-backup/backend/config"
+	"github.com/AlexAkulov/clickhouse-backup/backend/utils"
 	"github.com/jmoiron/sqlx"
 	_ "github.com/kshvakov/clickhouse"
 )
@@ -16,7 +18,7 @@ import (
 // ClickHouse - provide info and freeze tables
 type ClickHouse struct {
 	DryRun bool
-	Config *ClickHouseConfig
+	Config *config.ClickHouseConfig
 	conn   *sqlx.DB
 	uid    *int
 	gid    *int
@@ -163,7 +165,7 @@ func (ch *ClickHouse) GetBackupTables(backupName string) (map[string]BackupTable
 	tableNum := 1
 	partNum := 2
 	totalNum := 3
-	if isClickhouseShadow(backupShadowPath) {
+	if utils.IsClickhouseShadow(backupShadowPath) {
 		dbNum = 2
 		tableNum = 3
 		partNum = 4

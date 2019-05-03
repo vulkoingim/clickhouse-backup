@@ -12,6 +12,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/AlexAkulov/clickhouse-backup/backend/clickhouse"
+	"github.com/AlexAkulov/clickhouse-backup/backend/config"
+	"github.com/AlexAkulov/clickhouse-backup/backend/storage/s3"
+	"github.com/AlexAkulov/clickhouse-backup/backend/utils"
 	"github.com/urfave/cli"
 )
 
@@ -168,7 +172,7 @@ func main() {
 			Name:  "default-config",
 			Usage: "Print default config and exit",
 			Action: func(*cli.Context) {
-				PrintDefaultConfig()
+				config.PrintDefaultConfig()
 			},
 			Flags: cliapp.Flags,
 		},
@@ -186,11 +190,11 @@ func main() {
 	}
 }
 
-func parseTablePatternForFreeze(tables []Table, tablePattern string) ([]Table, error) {
+func parseTablePatternForFreeze(tables []clickhouse.Table, tablePattern string) ([]clickhouse.Table, error) {
 	if tablePattern == "" {
 		return tables, nil
 	}
-	var result []Table
+	var result []clickhouse.Table
 	for _, t := range tables {
 		if matched, _ := filepath.Match(tablePattern, fmt.Sprintf("%s.%s", t.Database, t.Name)); matched {
 			result = append(result, t)
@@ -199,11 +203,11 @@ func parseTablePatternForFreeze(tables []Table, tablePattern string) ([]Table, e
 	return result, nil
 }
 
-func parseTablePatternForRestoreData(tables map[string]BackupTable, tablePattern string) ([]BackupTable, error) {
+func parseTablePatternForRestoreData(tables map[string]clickhouse.BackupTable, tablePattern string) ([]clickhouse.BackupTable, error) {
 	if tablePattern == "" {
 		tablePattern = "*"
 	}
-	result := []BackupTable{}
+	result := []clickhouse.BackupTable{}
 	for _, t := range tables {
 		tableName := fmt.Sprintf("%s.%s", t.Database, t.Name)
 		if matched, _ := filepath.Match(tablePattern, tableName); matched {
@@ -213,9 +217,9 @@ func parseTablePatternForRestoreData(tables map[string]BackupTable, tablePattern
 	return result, nil
 }
 
-func parseTablePatternForRestoreSchema(metadataPath, tablePattern string) ([]RestoreTable, error) {
-	regularTables := []RestoreTable{}
-	distributedTables := []RestoreTable{}
+func parseTablePatternForRestoreSchema(metadataPath, tablePattern string) ([]clickhouse.RestoreTable, error) {
+	regularTables := []clickhouse.RestoreTable{}
+	distributedTables := []clickhouse.RestoreTable{}
 	filepath.Walk(metadataPath, func(filePath string, info os.FileInfo, err error) error {
 		if !strings.HasSuffix(filePath, ".sql") || !info.Mode().IsRegular() {
 			return nil
@@ -238,7 +242,7 @@ func parseTablePatternForRestoreSchema(metadataPath, tablePattern string) ([]Res
 		if err != nil {
 			return err
 		}
-		restoreTable := RestoreTable{
+		restoreTable := clickhouse.RestoreTable{
 			Database: database,
 			Table:    table,
 			Query:    strings.Replace(string(data), "ATTACH", "CREATE", 1),
@@ -253,8 +257,8 @@ func parseTablePatternForRestoreSchema(metadataPath, tablePattern string) ([]Res
 	return append(regularTables, distributedTables...), nil
 }
 
-func getTables(config Config) error {
-	ch := &ClickHouse{
+func getTables(config config.Config) error {
+	ch := &clickhouse.ClickHouse{
 		Config: &config.ClickHouse,
 	}
 
@@ -277,7 +281,7 @@ func getTables(config Config) error {
 	return nil
 }
 
-func restoreSchema(config Config, backupName string, tablePattern string, dryRun bool) error {
+func restoreSchema(config config.Config, backupName string, tablePattern string, dryRun bool) error {
 	if backupName == "" {
 		fmt.Println("Select backup for restore:")
 		printLocalBackups(config)
@@ -305,7 +309,7 @@ func restoreSchema(config Config, backupName string, tablePattern string, dryRun
 	if len(tablesForRestore) == 0 {
 		return fmt.Errorf("No have found schemas by %s in %s", tablePattern, backupName)
 	}
-	ch := &ClickHouse{
+	ch := &clickhouse.ClickHouse{
 		DryRun: dryRun,
 		Config: &config.ClickHouse,
 	}
@@ -323,7 +327,7 @@ func restoreSchema(config Config, backupName string, tablePattern string, dryRun
 	return nil
 }
 
-func printLocalBackups(config Config) error {
+func printLocalBackups(config config.Config) error {
 	backupList, err := listLocalBackups(config)
 	if err != nil && !os.IsNotExist(err) {
 		return err
@@ -337,7 +341,7 @@ func printLocalBackups(config Config) error {
 	return nil
 }
 
-func listLocalBackups(config Config) ([]Backup, error) {
+func listLocalBackups(config config.Config) ([]utils.Backup, error) {
 	dataPath := getDataPath(config)
 	if dataPath == "" {
 		return nil, ErrUnknownClickhouseDataPath
@@ -348,7 +352,7 @@ func listLocalBackups(config Config) ([]Backup, error) {
 		return nil, err
 	}
 	defer d.Close()
-	result := []Backup{}
+	result := []utils.Backup{}
 	names, err := d.Readdirnames(-1)
 	if err != nil {
 		return nil, err
@@ -361,7 +365,7 @@ func listLocalBackups(config Config) ([]Backup, error) {
 		if !info.IsDir() {
 			continue
 		}
-		result = append(result, Backup{
+		result = append(result, utils.Backup{
 			Name: name,
 			Date: info.ModTime(),
 		})
@@ -372,8 +376,8 @@ func listLocalBackups(config Config) ([]Backup, error) {
 	return result, nil
 }
 
-func printS3Backups(config Config) error {
-	s3 := &S3{Config: &config.S3}
+func printS3Backups(config config.Config) error {
+	s3 := &s3.S3{Config: &config.S3}
 	if err := s3.Connect(); err != nil {
 		return fmt.Errorf("can't connect to s3 with %v", err)
 	}
@@ -390,8 +394,8 @@ func printS3Backups(config Config) error {
 	return nil
 }
 
-func freeze(config Config, tablePattern string, dryRun bool) error {
-	ch := &ClickHouse{
+func freeze(config config.Config, tablePattern string, dryRun bool) error {
+	ch := &clickhouse.ClickHouse{
 		DryRun: dryRun,
 		Config: &config.ClickHouse,
 	}
@@ -443,7 +447,7 @@ func NewBackupName() string {
 	return time.Now().UTC().Format(BackupTimeFormat)
 }
 
-func createBackup(config Config, backupName, tablePattern string, dryRun bool) error {
+func createBackup(config config.Config, backupName, tablePattern string, dryRun bool) error {
 	if backupName == "" {
 		backupName = NewBackupName()
 	}
@@ -462,7 +466,7 @@ func createBackup(config Config, backupName, tablePattern string, dryRun bool) e
 		}
 	}
 	log.Println("Copy metadata")
-	if err := copyPath(path.Join(dataPath, "metadata"), path.Join(backupPath, "metadata"), dryRun); err != nil {
+	if err := utils.CopyPath(path.Join(dataPath, "metadata"), path.Join(backupPath, "metadata"), dryRun); err != nil {
 		return fmt.Errorf("can't backup metadata with %v", err)
 	}
 	log.Println("  Done.")
@@ -474,7 +478,7 @@ func createBackup(config Config, backupName, tablePattern string, dryRun bool) e
 			return err
 		}
 		shadowDir := path.Join(dataPath, "shadow")
-		if err := moveShadow(shadowDir, backupShadowDir); err != nil {
+		if err := utils.MoveShadow(shadowDir, backupShadowDir); err != nil {
 			return err
 		}
 	}
@@ -485,7 +489,7 @@ func createBackup(config Config, backupName, tablePattern string, dryRun bool) e
 	return nil
 }
 
-func restoreData(config Config, backupName string, tablePattern string, dryRun bool) error {
+func restoreData(config config.Config, backupName string, tablePattern string, dryRun bool) error {
 	if backupName == "" {
 		fmt.Println("Select backup for restore:")
 		printLocalBackups(config)
@@ -495,7 +499,7 @@ func restoreData(config Config, backupName string, tablePattern string, dryRun b
 	if dataPath == "" {
 		return ErrUnknownClickhouseDataPath
 	}
-	ch := &ClickHouse{
+	ch := &clickhouse.ClickHouse{
 		DryRun: dryRun,
 		Config: &config.ClickHouse,
 	}
@@ -526,11 +530,11 @@ func restoreData(config Config, backupName string, tablePattern string, dryRun b
 	return nil
 }
 
-func getDataPath(config Config) string {
+func getDataPath(config config.Config) string {
 	if config.ClickHouse.DataPath != "" {
 		return config.ClickHouse.DataPath
 	}
-	ch := &ClickHouse{Config: &config.ClickHouse}
+	ch := &clickhouse.ClickHouse{Config: &config.ClickHouse}
 	if err := ch.Connect(); err != nil {
 		return ""
 	}
@@ -542,7 +546,7 @@ func getDataPath(config Config) string {
 	return dataPath
 }
 
-func getLocalBackup(config Config, backupName string) error {
+func getLocalBackup(config config.Config, backupName string) error {
 	if backupName == "" {
 		return fmt.Errorf("backup name is required")
 	}
@@ -558,7 +562,7 @@ func getLocalBackup(config Config, backupName string) error {
 	return fmt.Errorf("backup '%s' not found", backupName)
 }
 
-func upload(config Config, backupName string, diffFrom string, dryRun bool) error {
+func upload(config config.Config, backupName string, diffFrom string, dryRun bool) error {
 	if backupName == "" {
 		fmt.Println("Select backup for upload:")
 		printLocalBackups(config)
@@ -568,7 +572,7 @@ func upload(config Config, backupName string, diffFrom string, dryRun bool) erro
 	if dataPath == "" {
 		return ErrUnknownClickhouseDataPath
 	}
-	s3 := &S3{
+	s3 := &s3.S3{
 		DryRun: dryRun,
 		Config: &config.S3,
 	}
@@ -603,7 +607,7 @@ func upload(config Config, backupName string, diffFrom string, dryRun bool) erro
 	return nil
 }
 
-func download(config Config, backupName string, dryRun bool) error {
+func download(config config.Config, backupName string, dryRun bool) error {
 	if backupName == "" {
 		fmt.Println("Select backup for download:")
 		printS3Backups(config)
@@ -613,7 +617,7 @@ func download(config Config, backupName string, dryRun bool) error {
 	if dataPath == "" {
 		return ErrUnknownClickhouseDataPath
 	}
-	s3 := &S3{
+	s3 := s3.S3{
 		DryRun: dryRun,
 		Config: &config.S3,
 	}
@@ -626,7 +630,7 @@ func download(config Config, backupName string, dryRun bool) error {
 	return s3.DownloadTree(backupName, path.Join(dataPath, "backup", backupName))
 }
 
-func clean(config Config, dryRun bool) error {
+func clean(config config.Config, dryRun bool) error {
 	dataPath := getDataPath(config)
 	if dataPath == "" {
 		return ErrUnknownClickhouseDataPath
@@ -638,14 +642,14 @@ func clean(config Config, dryRun bool) error {
 	}
 	log.Printf("Clean %s", shadowDir)
 	if !dryRun {
-		if err := cleanDir(shadowDir); err != nil {
+		if err := utils.CleanDir(shadowDir); err != nil {
 			return fmt.Errorf("can't remove contents from directory %v: %v", shadowDir, err)
 		}
 	}
 	return nil
 }
 
-func removeOldBackupsLocal(config Config, dryRun bool) error {
+func removeOldBackupsLocal(config config.Config, dryRun bool) error {
 	if config.S3.BackupsToKeepLocal < 1 {
 		return nil
 	}
@@ -657,7 +661,7 @@ func removeOldBackupsLocal(config Config, dryRun bool) error {
 	if dataPath == "" {
 		return ErrUnknownClickhouseDataPath
 	}
-	backupsToDelete := GetBackupsToDelete(backupList, config.S3.BackupsToKeepLocal)
+	backupsToDelete := utils.GetBackupsToDelete(backupList, config.S3.BackupsToKeepLocal)
 	for _, backup := range backupsToDelete {
 		backupPath := path.Join(dataPath, "backup", backup.Name)
 		if dryRun {
@@ -669,13 +673,13 @@ func removeOldBackupsLocal(config Config, dryRun bool) error {
 	return nil
 }
 
-func getConfig(ctx *cli.Context) *Config {
+func getConfig(ctx *cli.Context) *config.Config {
 	configPath := ctx.String("config")
 	if configPath == defaultConfigPath {
 		configPath = ctx.GlobalString("config")
 	}
 
-	config, err := LoadConfig(configPath)
+	config, err := config.LoadConfig(configPath)
 	if err != nil {
 		log.Fatal(err)
 	}

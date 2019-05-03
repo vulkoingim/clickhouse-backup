@@ -77,7 +77,8 @@ func validateConfig(config *Config) error {
 	default:
 		return fmt.Errorf("unknown s3.overwrite_strategy it can be 'skip', 'etag', 'always'")
 	}
-	_, err := getArchiveWriter(config.S3.CompressionFormat, config.S3.CompressionLevel)
+	var err error
+	// _, err := getArchiveWriter(config.S3.CompressionFormat, config.S3.CompressionLevel)
 	return err
 }
 
